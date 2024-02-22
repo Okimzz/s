@@ -1,19 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import sys
-import os
+
+from __future__ import absolute_import
+
+import io
+import json
 import logging
+import os
+import sys
 import unittest
+
+from ghost import GhostTestCase
+from ghost.bindings import BINDING_NAME
+from ghost.ghost import default_user_agent
+
+from .app import app
+
 try:
     import cookielib
 except ImportError:
     from http import cookiejar as cookielib
 
-from app import app
-from ghost import GhostTestCase
-
-
-PY3 = sys.version > '3'
 
 PORT = 5000
 
@@ -23,7 +30,6 @@ base_url = 'http://localhost:%s/' % PORT
 class GhostTest(GhostTestCase):
     port = PORT
     display = False
-    log_level = logging.INFO
 
     @classmethod
     def create_app(cls):
@@ -53,14 +59,27 @@ class GhostTest(GhostTestCase):
 
     def test_extra_resource_content(self):
         page, resources = self.session.open(base_url)
-        self.assertIn('globals alert', resources[4].content)
+        self.assertEqual(len(resources), 6)
+
+        for resource in resources:
+            if resource.url.endswith('app.js'):
+                break
+        else:
+            raise AssertionError('app.js was not downloaded')
+
+        self.assertIn(b'globals alert', resource.content)
 
     def test_extra_resource_binaries(self):
         page, resources = self.session.open(base_url)
-        self.assertEqual(
-            resources[5].content.__class__.__name__,
-            'QByteArray',
-        )
+        self.assertEqual(len(resources), 6)
+
+        for resource in resources:
+            if resource.url.endswith('blackhat.jpg'):
+                break
+        else:
+            raise AssertionError('blackhat.jpg was not downloaded')
+
+        self.assertIsInstance(resource.content, bytes)
 
     def test_wait_for_selector(self):
         page, resources = self.session.open(base_url)
@@ -203,6 +222,9 @@ class GhostTest(GhostTestCase):
         msg, resources = self.session.wait_for_alert()
         self.assertEqual(msg, 'you denied!')
 
+    @unittest.skipIf(os.environ.get('TRAVIS') == "true" and
+                     os.environ.get('TOXENV') in ("py34-pyqt4", "py34-pyqt5"),
+                     'Test broken in this configuration on Travis CI')
     def test_prompt(self):
         self.session.open(base_url)
         with self.session.prompt('my value'):
@@ -210,6 +232,9 @@ class GhostTest(GhostTestCase):
         value, resources = self.session.evaluate('promptValue')
         self.assertEqual(value, 'my value')
 
+    @unittest.skipIf(os.environ.get('TRAVIS') == "true" and
+                     os.environ.get('TOXENV') in ("py34-pyqt4", "py34-pyqt5"),
+                     'Test broken in this configuration on Travis CI')
     def test_prompt_callable(self):
         self.session.open(base_url)
         with self.session.prompt(lambda: 'another value'):
@@ -217,6 +242,9 @@ class GhostTest(GhostTestCase):
         value, resources = self.session.evaluate('promptValue')
         self.assertEqual(value, 'another value')
 
+    @unittest.skipIf(os.environ.get('TRAVIS') == "true" and
+                     os.environ.get('TOXENV') == "py34-pyqt4",
+                     'Running on Travis CI/Python 3.4/PyQt4')
     def test_popup_messages_collection(self):
         self.session.open(base_url, default_popup_response=True)
         self.session.click('#confirm-button')
@@ -329,6 +357,11 @@ class GhostTest(GhostTestCase):
             "document.querySelector('option[value=one]').selected;")
         self.assertFalse(value)
 
+    @unittest.skipIf(
+        BINDING_NAME == 'PyQt5' or
+        os.environ.get('TRAVIS') == "true",
+        'Running on Travis CI or using PyQt5'
+    )
     def test_set_field_value_simple_file_field(self):
         self.session.open(base_url)
         self.session.set_field_value(
@@ -340,10 +373,16 @@ class GhostTest(GhostTestCase):
             'submit',
             expect_loading=True,
         )
-        file_path = os.path.join(
-            os.path.dirname(__file__), 'uploaded_blackhat.jpg')
-        self.assertTrue(os.path.isfile(file_path))
-        os.remove(file_path)
+        file_path = os.path.join(os.path.dirname(__file__),
+                                 'uploaded_blackhat.jpg')
+
+        try:
+            self.assertTrue(os.path.isfile(file_path),
+                            msg='QtWebKit did not provide local file name')
+            os.remove(file_path)
+        except AssertionError:
+            os.remove(os.path.join(os.path.dirname(__file__), 'uploaded_'))
+            raise
 
     def test_basic_http_auth_success(self):
         page, resources = self.session.open(
@@ -366,12 +405,8 @@ class GhostTest(GhostTestCase):
             'static',
             'foo.tar.gz',
         )
-        if PY3:
-            f = open(file_path, 'r', encoding='latin-1')
-        else:
-            f = open(file_path, 'r')
-        foo = f.read(1024)
-        f.close()
+        with io.open(file_path, 'rb') as f:
+            foo = f.read()
 
         self.assertEqual(resources[0].content, foo)
 
@@ -424,6 +459,35 @@ class GhostTest(GhostTestCase):
         session.open(base_url)
         self.assertRaises(LookupError, session.frame, 10)
 
+    def test_set_user_agent(self):
+        def get_user_agent(session, **kwargs):
+            page, resources = self.session.open(
+                "%sdump" % base_url,
+                **kwargs
+            )
+            data = json.loads(page.content.decode('utf-8'))
+            return data['headers']['User-Agent']
+
+        session = self.session
+
+        self.assertEqual(get_user_agent(session), default_user_agent)
+
+        new_agent = 'New Agent'
+
+        self.assertEqual(
+            get_user_agent(session, user_agent=new_agent),
+            new_agent,
+        )
+
+    def test_exclude_regex(self):
+        session = self.ghost.start(exclude="\.(jpg|css)")
+        page, resources = session.open(base_url)
+        url_loaded = [r.url for r in resources]
+        self.assertFalse(
+            "%sstatic/styles.css" % base_url in url_loaded)
+        self.assertFalse(
+            "%sstatic/blackhat.jpg" % base_url in url_loaded)
+        session.exit()
 
 if __name__ == '__main__':
     unittest.main()

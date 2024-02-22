@@ -1,13 +1,22 @@
 # -*- coding: utf-8 -*-
-import sys
-PY3 = sys.version > '3'
+import io
 import os
+import sys
 
-from flask import Flask, render_template, url_for, redirect, jsonify
-from flask import request, abort, Response, flash
-from flask import make_response
-
+from flask import (
+    Flask,
+    Response,
+    abort,
+    flash,
+    jsonify,
+    make_response,
+    redirect,
+    render_template,
+    request,
+    url_for,
+)
 from werkzeug.datastructures import Headers
+
 
 app = Flask(__name__)
 app.config['CSRF_ENABLED'] = False
@@ -111,10 +120,7 @@ def send_file():
     h.add('Content-type', 'application/octet-stream', charset='utf8')
     h.add('Content-disposition', 'attachment', filename='name.tar.gz')
     file_path = os.path.join(os.path.dirname(__file__), 'static', 'foo.tar.gz')
-    if PY3:
-        f = open(file_path, 'r', encoding='latin-1')
-    else:
-        f = open(file_path, 'r')
+    f = io.open(file_path, 'rb')
     return Response(f, headers=h)
 
 
@@ -147,6 +153,11 @@ def js_assets(name=None):
 @app.route('/css/<name>.css')
 def css_assets(name=None):
     return 'P.%s { color: red; };' % name
+
+
+@app.route('/dump')
+def dump():
+    return jsonify(dict(headers=dict(request.headers)))
 
 
 if __name__ == '__main__':

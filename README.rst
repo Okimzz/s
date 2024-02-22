@@ -1,8 +1,9 @@
 ghost.py
 ========
 
-.. image:: https://drone.io/github.com/jeanphix/Ghost.py/status.png
-   :target: https://drone.io/github.com/jeanphix/Ghost.py/latest
+.. image:: https://travis-ci.org/jeanphix/Ghost.py.svg?branch=master
+   :target: https://travis-ci.org/jeanphix/Ghost.py
+   :alt: Build Status
 
 
 ghost.py is a webkit web client written in python:
@@ -34,8 +35,7 @@ OSX:
     brew install qt
     mkvirtualenv foo
     pip install -U pip  # make sure pip is current
-    pip install PySide
-    pyside_postinstall.py -install
+    pip install "PySide>=1.2.4"
     pip install Ghost.py
 
 
